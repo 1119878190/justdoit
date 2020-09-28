@@ -1,0 +1,1431 @@
+
+
+
+
+## 0.环境搭建
+
+### 1.依赖
+
+```xml
+ <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>2.1.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>druid</artifactId>
+            <version>1.1.8</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.junit.vintage</groupId>
+                    <artifactId>junit-vintage-engine</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+```
+
+
+
+### 2. application.yml 配置文件
+
+``` yaml
+#配置数据源
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql:///justdoit?serverTimezone=Hongkong
+    username: root
+    password: 123
+    initialization-mode: always
+    type: com.alibaba.druid.pool.DruidDataSource
+
+    #   数据源其他配置
+    initialSize: 5
+    minIdle: 5
+    maxActive: 20
+    maxWait: 60000
+    timeBetweenEvictionRunsMillis: 60000
+    minEvictableIdleTimeMillis: 300000
+    validationQuery: SELECT 1 FROM DUAL
+    testWhileIdle: true
+    testOnBorrow: false
+    testOnReturn: false
+    poolPreparedStatements: true
+    #   配置监控统计拦截的filters，去掉后监控界面sql无法统计，'wall'用于防火墙
+    filters: stat,wall,slf4j
+    maxPoolPreparedStatementPerConnectionSize: 20
+    useGlobalDataSourceStat: true
+    connectionProperties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=500
+
+
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.justodit.entity
+  configuration:
+    use-generated-keys: true
+#    驼峰命名
+    map-underscore-to-camel-case: true
+```
+
+
+
+项目目录结构
+
+![image-20200818183730959](imgaes/image-20200818183730959.png)
+
+
+
+###  3.druid自定义配置类
+
+``` java
+package com.justodit.config;
+
+
+import com.alibaba.druid.support.http.StatViewServlet;
+import com.alibaba.druid.support.http.WebStatFilter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
+import javax.sql.DataSource;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+@Configuration
+public class DruidConfig {
+
+    @ConfigurationProperties(prefix = "spring.datasource")
+    @Bean
+    public DataSource druid(){
+
+        return new DriverManagerDataSource();
+
+    }
+
+    //配置Druid的监控
+    //1、配置一个管理后台的Servlet
+    @Bean
+    public ServletRegistrationBean statViewServlet(){
+        ServletRegistrationBean bean = new ServletRegistrationBean(new StatViewServlet(), "/druid/*");
+        Map<String,String> initParams = new HashMap<>();
+
+        initParams.put("loginUsername","admin");
+        initParams.put("loginPassword","123456");
+        initParams.put("allow","");//默认就是允许所有访问
+        initParams.put("deny","192.168.15.21");
+
+        bean.setInitParameters(initParams);
+        return bean;
+    }
+
+
+    //2、配置一个web监控的filter
+    @Bean
+    public FilterRegistrationBean webStatFilter(){
+        FilterRegistrationBean bean = new FilterRegistrationBean();
+        bean.setFilter(new WebStatFilter());
+
+        Map<String,String> initParams = new HashMap<>();
+        initParams.put("exclusions","*.js,*.css,/druid/*");
+
+        bean.setInitParameters(initParams);
+
+        bean.setUrlPatterns(Arrays.asList("/*"));
+
+        return  bean;
+    }
+}
+
+```
+
+
+
+DisCussPostMapper.class
+
+```` java
+package com.justodit.dao;
+
+import com.justodit.entity.DiscussPost;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import java.util.List;
+
+@Mapper
+public interface DiscussPostMapper {
+
+    //查询帖子 分页查询    传入userid是为了以后可以根据id查询用户发了哪些帖子
+    List<DiscussPost> selectDiscussPosts(int userId, int offset, int limit);
+
+    //查询一共有多少条帖子
+    //@Param 注解用于给参数取别名  如果只有一个参数,并且在<if>里使用,则必须加别名
+    int selectDisCussPostRows(@Param("userId") int userId);
+}
+
+````
+
+UserMapper.class
+
+````java
+package com.justodit.dao;
+
+
+import com.justodit.entity.User;
+import org.apache.ibatis.annotations.Mapper;
+
+@Mapper
+public interface UserMapper {
+
+    User selectById(int id);
+
+    User selectByName(String username);
+
+    User selectByEmail(String email);
+
+    int insertUser(User user);
+
+    int updateStatus(int id, int status);
+
+    int updateHeader(int id, String headerUrl);
+
+    int updatePassword(int id, String password);
+
+}
+
+````
+
+discusspost-mapper.xml
+
+````xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.justodit.dao.DiscussPostMapper">
+
+
+    <sql id="selectFields">
+        id, user_id, title, content, type, status, create_time, comment_count, score
+    </sql>
+
+    <!--   查询帖子    status为2表示帖子被拉黑 -->
+    <select id="selectDiscussPosts" resultType="com.justodit.entity.DiscussPost">
+        select <include refid="selectFields"></include>
+        from discuss_post
+        where status != 2
+        <if test="userId!=0">
+            and user_id = #{userId}
+        </if>
+        order by type desc  ,create_time desc
+        limit #{offset},#{limit}
+    </select>
+
+    <!--查询所有帖子    -->
+    <select id="selectDisCussPostRows" resultType="integer">
+        select count(id)
+        from discuss_post
+        where status != 2
+        <if test="userId!=0">
+            and user_id = #{userId}
+        </if>
+    </select>
+</mapper>
+````
+
+user-mapper.xml
+
+````xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.justodit.dao.UserMapper">
+
+    <sql id="insertFields">
+        username, password, salt, email, type, status, activation_code, header_url, create_time
+    </sql>
+
+    <sql id="selectFields">
+        id, username, password, salt, email, type, status, activation_code, header_url, create_time
+    </sql>
+
+    <select id="selectById" resultType="com.justodit.entity.User">
+        select <include refid="selectFields"></include>
+        from user
+        where id = #{id}
+    </select>
+
+    <select id="selectByName" resultType="com.justodit.entity.User">
+        select <include refid="selectFields"></include>
+        from user
+        where username = #{username}
+    </select>
+
+    <select id="selectByEmail" resultType="com.justodit.entity.User">
+        select <include refid="selectFields"></include>
+        from user
+        where email = #{email}
+    </select>
+
+    <insert id="insertUser" parameterType="com.justodit.entity.User" keyProperty="id">
+        insert into user (<include refid="insertFields"></include>)
+        values(#{username}, #{password}, #{salt}, #{email}, #{type}, #{status}, #{activationCode}, #{headerUrl}, #{createTime})
+    </insert>
+
+    <update id="updateStatus">
+        update user set status = #{status} where id = #{id}
+    </update>
+
+    <update id="updateHeader">
+        update user set header_url = #{headerUrl} where id = #{id}
+    </update>
+
+    <update id="updatePassword">
+        update user set password = #{password} where id = #{id}
+    </update>
+
+</mapper>
+````
+
+controller
+
+```java
+package com.justodit.controller;
+
+
+import com.justodit.entity.DiscussPost;
+import com.justodit.entity.Page;
+import com.justodit.entity.User;
+import com.justodit.service.DiscussPostService;
+import com.justodit.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@Controller
+public class HomeController {
+
+    @Autowired
+    private DiscussPostService discussPostService;
+
+    @Autowired
+    private UserService userService;
+
+    @RequestMapping(value = "/index",method = RequestMethod.GET)
+    public String getIndex(Model model, Page page){
+
+        //获取所有的文章数
+        page.setRows(discussPostService.findDiscussPostRows(0));
+        page.setPath("/index");
+
+        //分页查询文章
+        List<DiscussPost> list = discussPostService.findDiscussPost(0,page.getOffset(),page.getLimit() );
+        //存放post 和 user信息集合
+        List<Map<String,Object>> discussPosts = new ArrayList<>();
+        if (list != null){
+            for (DiscussPost post : list) {
+                Map<String,Object> map = new HashMap<>();
+                map.put("post",post);
+                //根据post的userid查询用户
+                User user = userService.findUserById(post.getUserId());
+                map.put("user",user);
+
+                discussPosts.add(map);
+
+            }
+        }
+        model.addAttribute("discussPosts",discussPosts);
+        return "/index";
+    }
+}
+```
+
+
+
+## 一.thymeleaf语法
+
+  ### 1.strings工具
+
+``` java
+@Controller
+@RequestMapping("/strings")
+public class StringsController {
+
+
+    @GetMapping("/empty")
+    public String testEmpty(Model model){
+        model.addAttribute("info","info");
+
+        return "aboutStrings";
+
+    }
+}
+```
+
+**#strings.isEmpty**
+
+``` html
+<p>
+    1.检测字符类型info变量是否为空
+    <span th:text="${#strings.isEmpty(info)}"></span>
+</p>
+```
+
+**#strings.contatis()**
+
+``` html
+<p>
+    2.判断字符串中是否有指定的字符   info中是否含有a
+    <span th:text="${#strings.contains(info,'a')}"></span>
+</p>
+```
+
+**#strings.startWith()**
+
+``` html
+<p>
+    3.判断一个字符串变量是否以指定的字符开头  info是否已i开头
+    <span th:text="${#strings.startsWith(info,'i')}"></span>
+</p>
+```
+
+**#strings.endWith()**
+
+``` html
+<p>
+    4.判断一个字符串变量是否以指定的字符结尾  info是否已f结尾
+    <span th:text="${#strings.endsWith(info,'f')}"></span>
+</p>
+```
+
+**#strings.length()**
+
+``` html
+<p>
+    5.获取字符串变量的长度
+    <span th:text="${#strings.length(info)}"></span>
+</p>
+```
+
+
+
+**#strings.indexOf()**
+
+``` html
+<p>
+    6.检测字符串变量info中字符n的位置
+    <span th:text="${#strings.indexOf(info,'n')}"></span>
+</p>
+```
+
+ **#strings.substring()**
+
+``` html
+<p>
+    7.截取指定的字符串
+    <span th:text="${#strings.substring(info,0,2)}"></span>
+</p>
+```
+
+
+
+**#strings.toUpperCase()     #string.toLowerCase()**
+
+``` html
+<p>
+    8.大小写转换
+    <span th:text="${#strings.toUpperCase(info)}"></span>
+    <span th:text="${#strings.toLowerCase(info)}"></span>
+</p>
+```
+
+
+
+### 2.Dates工具
+
+``` java
+@Controller
+@RequestMapping("/dates")
+public class DateController {
+
+    @GetMapping("/test")
+    public String testDate(Model model){
+        model.addAttribute("current",new Date());
+        return "aboutDates";
+    }
+
+
+}
+```
+
+
+
+**#dates.formate()**
+
+``` html
+<p>
+    使用当前浏览器的指定语言转换时间
+    <span th:text="${#dates.format(current)}"></span>
+</p>
+<p>
+    使用自定义格式化语言
+    <span th:text="${#dates.format(current,'yyyy-MM-dd')}"></span>
+</p>
+<p>
+    获取时间的部分:
+    1.获取当前时间的年份 :   <span th:text="${#dates.year(current)}"></span><br>
+    2.获取当前时间的月份:   <span th:text="${#dates.month(current)}"></span><br>
+    3.获取当前时间的天数:   <span th:text="${#dates.day(current)}"></span><br>
+    4.获取当前星期的天数:  <span th:text="${#dates.dayOfWeek(current)}"></span><br>
+    5.获取当前星期数  <span th:text="${#dates.dayOfWeekName(current)}"></span><br>
+</p>
+```
+
+### 3.流程控制语句
+
+``` java
+@Controller
+@RequestMapping("/process")
+public class ProcessController {
+
+
+    @GetMapping("/statement")
+    public String testController(Model model){
+        model.addAttribute("info","info");
+        ArrayList<String> strings = new ArrayList<>();
+        StringBuffer temp = new StringBuffer("haha");
+        for (int i = 0; i < 10; i++) {
+            temp.append('a');
+            strings.add(temp.toString());
+        }
+        model.addAttribute("list",strings);
+
+        temp = new StringBuffer("aya");
+        HashMap<Integer,Item> map = new HashMap<>();
+        for (int i = 0; i < 10; i++) {
+            Item item = Item.builder().id(i).name(temp.toString()).build();
+            map.put(i,item);
+        }
+        model.addAttribute("map",map);
+        return "aboutStatement";
+    }
+
+
+}
+```
+
+
+
+**th:if**
+
+``` html
+<p>
+    if判断:
+    <span th:if="${info}=='info'">相同</span>
+    <span th:if="${info}=='info'" th:text="${info}"></span>
+</p>
+```
+
+
+
+th:switch
+
+``` html
+<div>
+    switch判断
+    <div th:switch="${info}">
+        <span th:case="info">info</span>
+        <span th:case="strings">strings</span>
+        <span th:case="dates">dates</span>
+    </div>
+</div>
+```
+
+
+
+**th:each**   
+
+ 遍历list
+
+``` html
+ <tr th:each="item,status:${list}">
+            <td th:text="${status.index}"></td>
+            <td th:text="${item}"></td>
+            <td th:text="${status.count}"></td>
+            <td th:text="${status.size}"></td>
+            <td th:text="${status.even}"></td>
+            <td th:text="${status.odd}"></td>
+            <td th:text="${status.first}"></td>
+            <td th:text="${status.last}"></td>
+            <td th:text="${status.current}"></td>
+        </tr>
+```
+
+遍历map
+
+``` html
+<tr th:each="item,status:${map}">
+            <td th:text="${status.count}"></td>
+            <td th:each="entry : ${item}" th:text="${entry.value.id}"></td>
+
+            <td th:each="entry: ${item}" th:text="${entry.value.name}"></td>
+
+        </tbody>
+```
+
+
+
+### 4.作用域
+
+ ``` java
+@Controller
+@RequestMapping("/scope")
+public class ScopeController {
+
+    @GetMapping("/test")
+    public String testScope(HttpServletRequest request){
+
+      request.setAttribute("request","这是request当中的数据");
+      request.getSession().setAttribute("session","这是session中的数据");
+      request.getSession().getServletContext().setAttribute("application","这是application中的数据");
+
+      return "aboutScope";
+    }
+}
+
+ ```
+
+
+
+``` html
+<p>
+    从request作用域中获取数据:
+    <span th:text="${#request.getAttribute('request')}"></span>
+    <span th:text="${#httpServletRequest.getAttribute('request')}"></span>
+</p>
+<p>
+    从session作用域中获取数据:
+    <span th:text="${#session.getAttribute('session')}"></span>
+    <span th:text="${#httpSession.getAttribute('session')}"></span>
+</p>
+<p>
+    从application作用域中获取数据:
+    <span th:text="${application.application}"></span>
+    <span th:text="${#servletContext.getAttribute('application')}"></span>
+</p>
+```
+
+### 5.高级用法
+
+th:utext**    于 th:text  效果一样 ，只是会将html标签转换
+
+
+
+**index?current=1&limit=10**
+
+```` html
+th:href="@{${page.path} (current=1,limit=10)}"   //路径设置的为index，根据情况改变
+````
+
+
+
+  **数组工具，生成一个指定开始到结束的数组并遍历（start,end）**
+
+```` html
+th:each="i:${#numbers.sequence(page.from,page.to)}"
+````
+
+
+
+**动态拼接变量  |       |  **          这里是判断样式是否生效
+
+```` html
+th:class="|page-item ${page.current == 1?'disabled':''}|"
+````
+
+
+
+### 6. 页面抽取
+
+```html
+1、抽取公共片段
+<div th:fragment="copy">
+&copy; 2011 The Good Thymes Virtual Grocery
+</div>
+
+2、引入公共片段
+<div th:insert="~{footer :: copy}"></div>
+~{templatename::selector}：模板名::选择器
+~{templatename::fragmentname}:模板名::片段名
+
+3、默认效果：
+insert的公共片段在div标签中
+如果使用th:insert等属性进行引入，可以不用写~{}：
+行内写法可以加上：[[~{}]];[(~{})]；
+```
+
+
+
+三种引入公共片段的th属性：
+
+**th:insert**：将公共片段整个插入到声明引入的元素中
+
+**th:replace**：将声明引入的元素替换为公共片段
+
+**th:include**：将被引入的片段的内容包含进这个标签中
+
+
+
+```html
+<footer th:fragment="copy">
+&copy; 2011 The Good Thymes Virtual Grocery
+</footer>
+
+引入方式
+<div th:insert="footer :: copy"></div>
+<div th:replace="footer :: copy"></div>
+<div th:include="footer :: copy"></div>
+
+效果
+<div>
+    <footer>
+    &copy; 2011 The Good Thymes Virtual Grocery
+    </footer>
+</div>
+
+<footer>
+&copy; 2011 The Good Thymes Virtual Grocery
+</footer>
+
+<div>
+&copy; 2011 The Good Thymes Virtual Grocery
+</div>
+```
+
+
+
+引入片段的时候传入参数： 
+
+```html
+<nav class="col-md-2 d-none d-md-block bg-light sidebar" id="sidebar">
+    <div class="sidebar-sticky">
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link active"
+                   th:class="${activeUri=='main.html'?'nav-link active':'nav-link'}"
+                   href="#" th:href="@{/main.html}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-home">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
+                    Dashboard <span class="sr-only">(current)</span>
+                </a>
+            </li>
+
+<!--引入侧边栏;传入参数-->
+<div th:replace="commons/bar::#sidebar(activeUri='emps')"></div>
+```
+
+
+
+
+
+## **二.分页**
+
+### 1.Page实体类
+
+``` java
+package com.justodit.entity;
+
+/**
+ * 分装分页相关的信息
+ */
+public class Page {
+
+    //当前的页码
+    private Integer current = 1;
+    //显示上限
+    private Integer limit = 10;
+
+    //数据的总数(用于计算总的页数)
+    private Integer rows;
+
+    //查询路径
+    private String path;
+
+    public Integer getCurrent() {
+        return current;
+    }
+
+    public void setCurrent(Integer current) {
+        if (current >=1){
+            this.current = current;
+        }
+    }
+
+    public Integer getLimit() {
+        return limit;
+    }
+
+    public void setLimit(Integer limit) {
+        if (limit >=1 && limit <= 100){
+            this.limit = limit;
+        }
+    }
+
+    public Integer getRows() {
+        return rows;
+    }
+
+    public void setRows(Integer rows) {
+        if (rows >= 0){
+            this.rows = rows;
+        }
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public void setPath(String path) {
+        this.path = path;
+    }
+
+    /**
+     * 获取当前页的起始行
+     * @return
+     */
+    public int getOffset(){
+        //current * limit -limit
+        return (current -1) * limit;
+    }
+
+    /**
+     * 获取总的页数
+     * @return
+     */
+    public int getTotal(){
+        // rows / limit +1
+        if (rows % limit == 0){
+            return rows / limit;
+        }else {
+            return  rows /limit +1;
+        }
+    }
+
+    //获取其实页码  显示5个页码
+    public int getFrom(){
+        int from = current -2;
+        return from < 1 ? 1:from;
+    }
+
+    //获取结束页码
+    public int getTo(){
+        int to = current +2;
+        int total = getTotal();
+        return to >total ? total :to;
+    }
+
+
+}
+
+```
+
+### 2.service
+
+```` java
+@Autowired
+    private DiscussPostMapper discussPostMapper;
+
+    //查询文章
+    public List<DiscussPost> findDiscussPost(Integer userId , Integer offset, Integer limit){
+
+        return discussPostMapper.selectDiscussPosts(userId,offset,limit);
+    }
+
+    //查询总行数
+    public  int findDiscussPostRows(Integer userId){
+        return  discussPostMapper.selectDisCussPostRows(userId);
+    }
+````
+
+### 3.mapper
+
+```` java
+@Mapper
+public interface DiscussPostMapper {
+
+    //查询帖子 分页查询    传入userid是为了以后可以根据id查询用户发了哪些帖子
+    List<DiscussPost> selectDiscussPosts(int userId, int offset, int limit);
+
+    //查询一共有多少条帖子
+    //@Param 注解用于给参数取别名  如果只有一个参数,并且在<if>里使用,则必须加别名
+    int selectDisCussPostRows(@Param("userId") int userId);
+}
+````
+
+
+
+### 4.xml
+
+``` xml
+<sql id="selectFields">
+        id, user_id, title, content, type, status, create_time, comment_count, score
+    </sql>
+
+    <!--   查询帖子    status为2表示帖子被拉黑 -->
+    <select id="selectDiscussPosts" resultType="com.justodit.entity.DiscussPost">
+        select <include refid="selectFields"></include>
+        from discuss_post
+        where status != 2
+        <if test="userId!=0">
+            and user_id = #{userId}
+        </if>
+        order by type desc  ,create_time desc
+        limit #{offset},#{limit}
+    </select>
+
+    <!--查询所有帖子    -->
+    <select id="selectDisCussPostRows" resultType="integer">
+        select count(id)
+        from discuss_post
+        where status != 2
+        <if test="userId!=0">
+            and user_id = #{userId}
+        </if>
+    </select>
+```
+
+### 5.controller
+
+```` java
+@Controller
+public class HomeController {
+
+    @Autowired
+    private DiscussPostService discussPostService;
+
+    @Autowired
+    private UserService userService;
+
+    @RequestMapping(value = "/index",method = RequestMethod.GET)
+    public String getIndex(Model model, Page page){
+
+        page.setRows(discussPostService.findDiscussPostRows(0));
+        page.setPath("/index");
+
+        List<DiscussPost> list = discussPostService.findDiscussPost(0,page.getOffset(),page.getLimit() );
+        List<Map<String,Object>> discussPosts = new ArrayList<>();
+        if (list != null){
+            for (DiscussPost post : list) {
+                Map<String,Object> map = new HashMap<>();
+                map.put("post",post);
+                User user = userService.findUserById(post.getUserId());
+                map.put("user",user);
+
+                discussPosts.add(map);
+
+            }
+        }
+        model.addAttribute("discussPosts",discussPosts);
+        return "/index";
+    }
+}
+````
+
+
+
+### 6.页面编写 
+
+themyleaf高级语法
+
+
+
+**th:utext**    于 th:text  效果一样 ，只是会将html标签转换
+
+
+
+**index?current=1&limit=10**
+
+```` html
+th:href="@{${page.path} (current=1,limit=10)}"   //路径设置的为index，根据情况改变
+````
+
+
+
+  **数组工具，生成一个指定开始到结束的数组并遍历（start,end）**
+
+```` html
+th:each="i:${#numbers.sequence(page.from,page.to)}"
+````
+
+
+
+**动态拼接变量  |       |  **          这里是判断样式是否生效
+
+```` html
+th:class="|page-item ${page.current == 1?'disabled':''}|"
+````
+
+
+
+
+
+````html
+<!-- 分页 -->
+				<nav class="mt-5" th:if="${page.rows > 0}">
+					<ul class="pagination justify-content-center">
+						<li class="page-item">
+<!--								@{${page.path} (current=1,limit=5)}		效果是:index?current=1&limit=5-->
+							<a class="page-link" th:href="@{${page.path} (current=1)}">首页</a>
+						</li>
+						<li th:class="|page-item ${page.current == 1?'disabled':''}|">
+							<a class="page-link"  th:href="@{${page.path} (current=${page.current -1})}">上一页</a>
+						</li>
+<!--												#numbers.sequence(pafe.from,page.to)  生成一个数据,开始到结束遍历-->
+						<li th:class="|page-item ${i==page.current?'active':''}|" th:each="i:${#numbers.sequence(page.from,page.to)}">
+							<a class="page-link" href="#" th:text="${i}">1</a>
+						</li>
+						<li th:class="|page-item ${page.current==page.total?'disabled':''}|">
+							<a class="page-link" th:href="@{${page.path} (current=${page.current + 1})}">下一页</a>
+						</li>
+						<li class="page-item">
+							<a class="page-link" th:href="@{${page.path}(current=${page.total})}">末页</a>
+						</li>
+					</ul>
+				</nav>
+````
+
+
+
+## **三. 项目调试技巧**
+
+### 1.debug
+
+
+
+![image-20200818190042010](imgaes/image-20200818190042010.png)
+
+**F8：执行下一行**
+
+**F7：进入当前行所调用的方法内部，出来的话配合F8使用**
+
+![image-20200818190411990](imgaes/image-20200818190411990.png)
+
+**F9 ：执行直到下一个断点为止**
+
+​		若执行到循环内，想要快速退出循环，可以在下方打个断点，按F9,如果没有断点，就跳到方法最后
+
+
+
+**快速删除断点**
+
+![image-20200818191207746](imgaes/image-20200818191207746.png)
+
+
+
+
+
+### 2.日志：控制台输出
+
+**logger级别，分为 debug,info,warn,error**
+
+
+
+**xml配置样式 ：**
+
+````xml
+#  Logger
+logging:
+   level: {com.demo.justdoit,warn}   #包名指的是这个包下的日志级别
+````
+
+**properties配置样式：**
+
+````pro
+logging.level.com.justodit=debug     #包名指的是这个包下的日志级别
+````
+
+
+
+**测试类**
+
+```` java
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit4.SpringRunner;
+
+
+@RunWith(SpringRunner.class)
+@SpringBootTest
+@ContextConfiguration(classes = DemoApplication.class)
+public class LoggerTest {
+
+    private static final Logger logger = LoggerFactory.getLogger(LoggerTest.class);
+
+
+    @Test
+    public void testLogger(){
+        //System.out.println(logger.getName());
+
+        logger.debug("debugLog");
+        logger.info("info Log");
+        logger.warn("warn Log");
+        logger.error("error log");
+    }
+
+}
+````
+
+![image-20200818200430711](imgaes/image-20200818200430711.png)
+
+
+
+### 3.日志：保存到文件
+
+**讲日志信息保存到文件中,控制台任然打印**
+
+
+
+xml配置
+
+```` yaml
+#  Logger
+logging:
+   level: {com.demo.justdoit,warn}   #指定包下的日志级别
+   file:
+     path: f:/result/justodit.log   #指定日志存放路径
+````
+
+
+
+properties配置
+
+``` pro
+logging.level.com.justodit=debug
+logging.file.path=f:/result/justodit.log
+```
+
+
+
+### **4.自定义日志格式，并将不同等级分开存放**
+
+ logback-spring.xml配置文件 放在resources目录下,会自动启用，如果为其它名字需要配置
+
+``` xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <contextName>community</contextName>
+    <property name="LOG_PATH" value="F:/result"/>    <!-- 这里的两个路径根据自己的情况改-->
+    <property name="APPDIR" value="log"/>
+
+    <!-- error file -->
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APPDIR}/log_error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/${APPDIR}/error/log-error-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>5MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <append>true</append>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
+            <charset>utf-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>error</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- warn file -->
+    <appender name="FILE_WARN" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APPDIR}/log_warn.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/${APPDIR}/warn/log-warn-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>5MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <append>true</append>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
+            <charset>utf-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>warn</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- info file -->
+    <appender name="FILE_INFO" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APPDIR}/log_info.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/${APPDIR}/info/log-info-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>5MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <append>true</append>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>%d %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
+            <charset>utf-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>info</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- console -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
+            <charset>utf-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>debug</level>
+        </filter>
+    </appender>
+
+    <logger name="com.justodit" level="debug"/>
+
+    <root level="info">
+        <appender-ref ref="FILE_ERROR"/>
+        <appender-ref ref="FILE_WARN"/>
+        <appender-ref ref="FILE_INFO"/>
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+</configuration>
+```
+
+![image-20200818203111483](imgaes/image-20200818203111483.png)
+
+
+
+
+
+
+
+## 四.版本控制 git
+
+### 1.准备工作
+
+
+
+**（1）查看版本**
+
+​			git version
+
+**（2）查看配置，是否有user.name  和user.email**
+
+​			git config --list  
+
+**（3）配置user.name和user.email**
+
+​			git config --global user.name "xxxxxx"
+
+​			git config -- global user.email "xxxxxxxx"
+
+**（4）查看时候配置成功**
+
+​			git config --list  
+
+
+
+### 2.将项目提交到本地仓库
+
+如果我们要提交项目的目录是D:\IDEAWorkSpace\ex
+
+**（1).切换到项目目录**
+
+​			cd D:/IDEAWorkSpace/ex
+
+  **(2).初始化git**
+
+​			git init
+
+​		会发现项目目录下会多出一个.get的隐藏目录
+
+![image-20200818210144008](imgaes/image-20200818210144008.png)
+
+
+
+**（3）.查看状态**
+
+​				git status     红色表示还未提交的文件
+
+​				![image-20200818210310435](imgaes/image-20200818210310435.png)
+
+**(4).添加到本地仓库**
+
+​			git  add  *         *表示所有文件    添加完成后查看状态会变成绿色
+
+![image-20200818210446693](imgaes/image-20200818210446693.png)
+
+**(5).提交项目**
+
+​			git commit -m 'test1'          -m  表示给这次提交起个备注   再次查看状态提示没有文件可以提交了
+
+![image-20200818210634048](imgaes/image-20200818210634048.png)
+
+![image-20200818210825440](imgaes/image-20200818210825440.png)
+
+
+
+​								如果修改了项目中的文件    查看状态会提示被修改的文件还没有添加到仓库中，再次giet add *，git commit 就可以了
+
+![image-20200818210953484](imgaes/image-20200818210953484.png)
+
+
+
+### 3.将项目提交到github
+
+​	**（1）.将项目提交到github首先需要生成本地密钥**
+
+​			ssh-keygen -t -ras -C "xxxxxxx@.com"    后面是注册github的邮箱  一直回车
+
+​			生成的密钥在   C:\Users\xxxx\.ssh
+
+![image-20200818212055701](imgaes/image-20200818212055701.png)
+
+
+
+**（2）.将密钥添加到github中**
+
+![image-20200818212312907](imgaes/image-20200818212312907.png)
+
+
+
+**（3）在github新建一个仓库**   
+
+​			这里测试 建了一个demo仓库
+
+​			![image-20200818213650406](imgaes/image-20200818213650406.png)
+
+**（4）.本地于仓库进行关联**
+
+​			git remote add origin git@github.com:1119878190/demo.git
+
+​							origin是给这个仓库起的别名
+
+
+
+**（5）.将本地仓库的文件提交到github**
+
+​			git push -u  origin master                         origin是前面起的别名   master是提交到哪个分支
+
+![image-20200818214104592](imgaes/image-20200818214104592.png)
+
+**（6）.查看github仓库，是否成功提交**
+
+![image-20200818214220623](imgaes/image-20200818214220623.png)
+
+
+
+### 4.将github仓库的代码下载到本地
+
+
+
+**（1）获取下载连接**
+
+![image-20200818214408138](imgaes/image-20200818214408138.png)
+
+**（2）切换到要保存项目的路径，然后clone**
+
+​			git clone   xxxxxxxxxxxxx项目的地址
+
+![image-20200818214710270](imgaes/image-20200818214710270.png)
+
+
+
+
+
+### 5.Idea使用git
+
+**（1）创建仓库**   创建完文件会变红
+
+![image-20200818215321303](imgaes/image-20200818215321303.png)
+
+![image-20200818215346451](imgaes/image-20200818215346451.png)
+
+**(2)提交到本地仓库**    提交后文件恢复颜色
+
+![image-20200818215806383](imgaes/image-20200818215806383.png)
+
+
+
+**（3）.提交到远程仓库**   要先在github上创建一个仓库，获取连接  
+
+![image-20200818220147368](imgaes/image-20200818220147368.png)
+
+![image-20200818220331471](imgaes/image-20200818220331471.png)
+
+
+
+
+
