@@ -5,7 +5,7 @@
 ## 注意：项目启动前需启动redis,kafka(zookeeper,kafka),elasticsearch
 
 
-## 该项目的笔记都在项目中
+## 该项目的笔记都在项目中，为本人自己整理编写，仅供参考
 
 
 
