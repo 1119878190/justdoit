@@ -1,0 +1,1445 @@
+# 一、Kafka，构建TB级异步消息系统
+
+
+
+## 0.阻塞队列，消费者与生产者
+
+![image-20200903213734260](imgaes/image-20200903213734260.png)
+
+**put:生产者** 
+
+**take：消费者**
+
+**阻塞队列Blocking Queye：起到了两个线程的缓冲作用，避免资源浪费**
+
+**当生产速度大于消费速度时，消息队列中先堆满消息，生产者会阻塞，生产者不会进行任何操作，进行等待。**
+
+**当消费速度大于生产速度，消息队列中没有消息时，消费者会阻塞，消费者不会进行任何操作，进行等待。**
+
+
+
+测试
+
+```java
+package com.justodit;
+
+import java.util.Random;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+
+//阻塞队列测试
+public class BlockingQueueTests {
+
+
+
+    public static void main(String[] args) {
+        BlockingQueue queue = new ArrayBlockingQueue(10);//这个队列中最多只能存放10条数据
+        new Thread(new producer(queue)).start();
+        new Thread(new Consumer(queue)).start();
+        new Thread(new Consumer(queue)).start();
+        new Thread(new Consumer(queue)).start();
+
+    }
+}
+
+//生产者
+class producer implements Runnable{
+
+    private BlockingQueue<Integer> queue;
+
+    public producer(BlockingQueue<Integer> queue){
+        this.queue = queue;
+    }
+
+    @Override
+    public void run() {
+        try {
+            //生产者生产100个消息
+            for (int i = 0; i < 100; i++) {
+                Thread.sleep(20);
+                queue.put(i);
+                System.out.println(Thread.currentThread().getName() + "生产" + queue.size());
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    }
+}
+
+//消费者
+class Consumer implements  Runnable{
+
+    private BlockingQueue<Integer> queue;
+
+    public Consumer(BlockingQueue<Integer> queue){
+        this.queue = queue;
+    }
+
+
+    @Override
+    public void run() {
+        try {
+            while (true){
+                Thread.sleep(new Random().nextInt(1000));
+                queue.take();
+                System.out.println(Thread.currentThread().getName() + "消费:" + queue.size());
+
+            }
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+    }
+}
+
+```
+
+
+
+## 1.Kafka入门
+
+![image-20200903221151409](imgaes/image-20200903221151409.png)
+
+Kafka对硬盘的读写时顺序读写，所以它的读写速度很快
+
+**Kafka中常用术语：**
+
+​		**Broker：Kafka服务器**
+
+​		**Zookeeper：管理集群**
+
+​		**Topic：主题  发布订阅模式**
+
+​		**Partition： 分区**
+
+​		**offset: 消息在分区中存放的序列，索引**
+
+​		**Leader Replica：主副本，对数据备份**
+
+​		**Follower Replica：随从副本**
+
+​		
+
+**1.下载Kafka 版本为2.12-2.30  Jdk版本要求 1.8.0_211**
+
+**2.修改配置文件**
+
+​		zookeeper.properties:    修改zookeeper数据存放路径    dataDir=F:/result/kafka/zookeeper
+
+​		server.properties :  修改Kafka日志存放路径     log.dirs=F:/result/kafka/kafka-logs
+
+**3.启动zookeeper**
+
+​		切换到kafka目录下>bin\windows\zooleeper-server-start.bat  config\zookeeper.properties
+
+![image-20200904160236588](imgaes/image-20200904160236588.png)
+
+​	切换到kafka目录下>bin\windows\kafka-server-start.bat config\server.properties
+
+![image-20200904160350557](imgaes/image-20200904160350557.png)
+
+**4.创建topic，发送消息**
+
+​	在windows目录下 kafka-topics.bat --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic test
+
+​		解释：--create xxxxx创建服务器  --replication-factor 1  副本  --partitions 1 分区   --topic xx  topic名字
+
+​	查看topic :   kafka-topics.bat -- list --bootstrap-server lcoalhost:9092
+
+​	发送消息：  kafka-console-producer.bat --broker-list localhost:9092 --topic test 回车  发送消息
+
+![image-20200904160645500](imgaes/image-20200904160645500.png)
+
+**5.接受消息**
+
+​	切换到windows目录下
+
+​		kafka-console-consumer.bat --bootstrap-server localhost:9092 --topic test --from-beginning
+
+![image-20200904161239402](imgaes/image-20200904161239402.png)
+
+​	
+
+
+
+## 2.Spring整合Kafka
+
+引入依赖
+
+​		--Spring-Kafka
+
+```xml
+ <!--  Kafka     -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <version>2.3.4.RELEASE</version>
+        </dependency>
+```
+
+
+
+配置Kafka
+
+​		--配置server、consumer
+
+访问Kafka
+
+​		-生产者
+
+​				kafkaTemplate.send(topic,data)
+
+​			--消费者
+
+​			@KafkaListener(topics = {"test"})
+
+​				public void handleMessage(ConsumerRecord record)
+
+​	
+
+```java
+package com.justodit;
+
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit4.SpringRunner;
+
+@RunWith(SpringRunner.class)
+@SpringBootTest
+@ContextConfiguration(classes = DemoApplication.class)
+public class KafkaTest {
+
+    @Autowired
+    private KafkaProducer KafkaProducer;
+
+    @Test
+    public void testKafka(){
+
+    KafkaProducer.sendMessage("test","你好啊");
+    KafkaProducer.sendMessage("test","在吗");
+
+        try {
+            Thread.sleep(1000 * 10);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+}
+
+//生产者
+@Component
+class KafkaProducer{
+
+    @Autowired
+    private KafkaTemplate kafkaTemplate;
+
+    public void sendMessage(String topic,String content){
+        kafkaTemplate.send(topic,content);
+    }
+}
+
+//消费者
+@Component
+class KafkaConsumer{
+
+    //监听器
+    @KafkaListener(topics = {"test"})
+
+    public void handlerMessage(ConsumerRecord record){
+        System.out.println(record.value());
+    }
+}
+```
+
+
+
+# 二、发送系统通知
+
+- 触发事件
+
+​		--评论后，发布通知
+
+​		--点赞后，发布通知
+
+​		--关注后，发布通知
+
+
+
+- 处理事件
+
+​		--封装事件对象
+
+​		--开发事件的生产者
+
+​		--开发事件的消费者
+
+
+
+**项目启动前必须启动kafka**
+
+## 0.kafka配置
+
+```properties
+#Kafka配置
+spring.kafka.bootstrap-servers=localhost:9092
+    #消费者组名  在配置文件中有
+spring.kafka.consumer.group-id=test-consumer-group
+    #是否自动提交
+spring.kafka.consumer.enable-auto-commit=true
+    #多久自动提交一次
+spring.kafka.consumer.auto-commit-interval=3000
+```
+
+
+
+## 1.Constant 常量接口
+
+```java
+//常量接口
+public interface Constant {
+    
+      /**
+     * 主题: 评论  系统通知
+     */
+    String  TOPIC_COMMENT = "comment";
+
+    /**
+     * 主题: 点赞  系统通知
+     */
+    String TOPIC_LIKE = "like";
+
+    /**
+     * 主题:关注  系统通知
+     */
+    String TOPIC_FOLLOW = "follow";
+
+
+    /**
+     * 系统管理员用户Id
+     */
+    int SYSTEM_USER_ID = 1;
+}
+
+```
+
+
+
+## 2.Event事件实体
+
+**用于存放到Message实体中的content中**
+
+````java
+package com.justodit.entity;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class Event {
+
+    private String topic;
+    private int userId;//触发事件的用户id
+    private int entityType;
+    private int entityId;
+    private int entityUserId;//作者的id
+    private Map<String,Object> data = new HashMap<>();
+
+    public String getTopic() {
+        return topic;
+    }
+
+    public Event setTopic(String topic) {
+        this.topic = topic;
+        return this;
+    }
+
+    public int getUserId() {
+        return userId;
+    }
+
+    public Event setUserId(int userId) {
+        this.userId = userId;
+        return this;
+    }
+
+    public int getEntityType() {
+        return entityType;
+    }
+
+    public Event setEntityType(int entityType) {
+        this.entityType = entityType;
+        return this;
+    }
+
+    public int getEntityId() {
+        return entityId;
+    }
+
+    public Event setEntityId(int entityId) {
+        this.entityId = entityId;
+        return this;
+    }
+
+    public int getEntityUserId() {
+        return entityUserId;
+    }
+
+    public Event setEntityUserId(int entityUserId) {
+        this.entityUserId = entityUserId;
+        return this;
+    }
+
+    public Map<String, Object> getData() {
+        return data;
+    }
+
+    public Event setData(String key,Object value) {
+        this.data.put(key,value);
+        return this;
+    }
+
+
+}
+
+````
+
+
+
+
+
+## 3.生产者、消费者
+
+**EventProducer 生产者**
+
+```java
+package com.justodit.event;
+
+import com.alibaba.fastjson.JSONObject;
+import com.justodit.entity.Event;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+
+//生产者
+@Component
+public class EventProducer {
+
+    @Autowired
+    private KafkaTemplate kafkaTemplate;
+
+    //处理事件
+    public void fireEvent(Event event){
+        //将事件发布到指定的主题  将内容转换为Json字符串
+        kafkaTemplate.send(event.getTopic(), JSONObject.toJSONString(event));
+    }
+
+
+}
+
+```
+
+
+
+**EventConsumer消费者**
+
+```java
+package com.justodit.event;
+
+import com.alibaba.fastjson.JSONObject;
+import com.justodit.entity.Event;
+import com.justodit.entity.Message;
+import com.justodit.service.MessageService;
+import com.justodit.util.Constant;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UnknownFormatConversionException;
+
+//消费者
+@Component
+public class EventConsumer implements Constant {
+
+    private static final Logger logger = LoggerFactory.getLogger(EventConsumer.class);
+
+
+    @Autowired
+    private MessageService messageService;
+
+    @KafkaListener(topics = {TOPIC_COMMENT,TOPIC_LIKE,TOPIC_FOLLOW})
+    public void handleCommentMessage(ConsumerRecord record){
+        if (record == null || record.value() == null){
+            logger.error("消息的内容为空");
+            return;
+        }
+
+        //解析内容 转换为Event对象  event.setData
+        Event event = JSONObject.parseObject(record.value().toString(),Event.class);
+        if (event == null){
+            logger.error("消息格式错误!!");
+        }
+
+        //发送站内通知
+        Message message = new Message();
+        message.setFromId(SYSTEM_USER_ID);
+        message.setToId(event.getEntityUserId());
+        message.setConversationId(event.getTopic());//这里将会话id设置为主题类型   like  comment followee
+        message.setCreateTime(new Date());
+
+
+        Map<String,Object> content = new HashMap<>();
+        content.put("userId",event.getUserId());//谁触发的事件
+        content.put("entityType",event.getEntityType());
+        content.put("entityId",event.getEntityId());
+
+        if (!event.getData().isEmpty()){
+            for (Map.Entry<String,Object> entry:event.getData().entrySet()){
+                content.put(entry.getKey(),entry.getValue());
+            }
+        }
+
+        message.setContent(JSONObject.toJSONString(content));
+        messageService.addMessage(message);
+    }
+
+}
+
+```
+
+
+
+## 4.评论通知--CommentController
+
+
+
+````java
+package com.justodit.controller;
+//评论
+import com.justodit.entity.Comment;
+import com.justodit.entity.DiscussPost;
+import com.justodit.entity.Event;
+import com.justodit.event.EventProducer;
+import com.justodit.service.CommentService;
+import com.justodit.service.DiscussPostService;
+import com.justodit.util.Constant;
+import com.justodit.util.HostHolder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import java.util.Date;
+
+@Controller
+@RequestMapping("/comment")
+public class CommentController implements Constant  {
+
+
+    @Autowired
+    private CommentService commentService;
+
+    @Autowired
+    private HostHolder hostHolder;
+
+    @Autowired
+    private EventProducer eventProducer;
+
+    @Autowired
+    private DiscussPostService discussPostService;
+
+    @RequestMapping(value = "/add/{discussPostId}",method = RequestMethod.POST)
+    public String addComment(@PathVariable("discussPostId")int discussPostId, Comment comment){
+
+        comment.setUserId(hostHolder.getUser().getId());//评论人的id
+        comment.setStatus(0);
+        comment.setCreateTime(new Date());
+        if (comment.getTargetId()==null){
+            comment.setTargetId(0);
+        }
+        commentService.addComment(comment);
+
+        //触发评论事件  系统通知
+        Event event = new Event()
+                    .setTopic(TOPIC_COMMENT)
+                    .setUserId(hostHolder.getUser().getId())
+                    .setEntityType(comment.getEntityType())
+                    .setEntityId(comment.getEntityId())
+                    .setData("postId",discussPostId);//设置postId是为了在页面上跳转到评论的帖子
+        //如果评论的是帖子  event中作者id为帖子的作者
+        if (comment.getEntityType() == ENTITY_TYPE_POST){
+            DiscussPost target = discussPostService.findDiscussPostById(comment.getEntityId());
+            event.setEntityUserId(target.getUserId());
+        }else if (comment.getEntityType() == ENTITY_TYPE_COMMENT){
+            //评论的是评论 event中作者的id是评论的id
+            Comment target = commentService.findCommentById(comment.getEntityId());
+            event.setEntityUserId(target.getUserId());
+        }
+        eventProducer.fireEvent(event);
+
+
+        //跳转到帖子详情页面
+        return "redirect:/discuss/detail/" + discussPostId;
+
+
+    }
+
+}
+
+````
+
+
+
+
+
+## 5.点赞通知--LikeController
+
+**这里对like()方法进行了重构，加了postId，需要在页面上的方法传如postId参数**
+
+```java
+package com.justodit.controller;
+//点赞
+import com.justodit.entity.Event;
+import com.justodit.entity.User;
+import com.justodit.event.EventProducer;
+import com.justodit.service.LikeService;
+import com.justodit.util.Constant;
+import com.justodit.util.HostHolder;
+import com.justodit.util.JustDoItUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.ResponseBody;
+import java.util.HashMap;
+import java.util.Map;
+
+@Controller
+public class LikeController implements Constant {
+
+    @Autowired
+    private LikeService likeService;
+
+    @Autowired
+    private HostHolder hostHolder;
+
+    @Autowired
+    private EventProducer eventProducer;
+
+
+    @RequestMapping(value = "/like",method = RequestMethod.POST)
+    @ResponseBody
+    public String like(int entityType,int entityId,int entityUserId,int postId){
+        User user = hostHolder.getUser();
+
+        //点赞 并增加,减少用户的点赞数量
+        likeService.like(user.getId(),entityType,entityId,entityUserId);
+        //数量
+        long likeCount = likeService.findEntityLikeCount(entityType,entityId);
+        //状态
+        int likeStatus = likeService.findEntityLikeStatus(user.getId(),entityType,entityId);
+
+        //返回结果
+        Map<String,Object> map = new HashMap<>();
+        map.put("likeCount",likeCount);
+        map.put("likeStatus",likeStatus);
+
+        //触发点赞事件  点赞才通知  取消赞不通知
+        if (likeStatus == 1){
+            Event event = new Event()
+                        .setTopic(TOPIC_LIKE)
+                        .setUserId(hostHolder.getUser().getId())
+                        .setEntityId(entityId)
+                        .setEntityType(entityType)
+                        .setEntityUserId(entityUserId)
+                        .setData("postId",postId);//设置PostId是为了页面上跳转到被点赞的帖子详情页面
+            eventProducer.fireEvent(event);
+        }
+
+
+        return JustDoItUtil.getJsonString(0,null,map);
+    }
+
+}
+
+```
+
+**页面修改，需要传入postId**
+
+discuss-detail.html
+
+![image-20200904214008316](imgaes/image-20200904214008316.png)
+
+discuss.js
+
+![image-20200904214116731](imgaes/image-20200904214116731.png)
+
+## 6.关注通知--FollowController
+
+```java
+@Controller
+public class FollowController implements Constant {
+
+    @Autowired
+    private FollowService followService;
+
+    @Autowired
+    private HostHolder hostHolder;
+
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private EventProducer eventProducer;
+
+    /**
+     * 关注
+     * @param entityType  关注的实体类型 这里常量接口中设置了默认为3
+     * @param entityId  关注用户的id
+     * @return Json
+     */
+    @RequestMapping(value = "/follow",method = RequestMethod.POST)
+    @ResponseBody
+    @LoginRequired
+    public String follow(Integer entityType,Integer entityId){
+        User user = hostHolder.getUser();
+
+        followService.follow(user.getId(),entityType,entityId);
+
+        //触发关注事件  系统通知
+        Event event = new Event()
+                    .setTopic(TOPIC_FOLLOW)
+                    .setUserId(hostHolder.getUser().getId())
+                    .setEntityId(entityId)
+                    .setEntityType(entityType)
+                    .setEntityUserId(entityId);
+        eventProducer.fireEvent(event);
+
+        return JustDoItUtil.getJsonString(0,"已关注");
+    }
+
+```
+
+
+
+## 7.空指针异常
+
+​	**前面我们配置了AOP监控所有Service层，记录用户的浏览记录，由于消息通知直接在Controller中写入，没有调用Service，会出现attribute空指针异常,需要对其进行简单的空值判断**
+
+```java
+package com.justodit.aspect;
+
+//日志记录
+import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Before;
+import org.aspectj.lang.annotation.Pointcut;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import javax.servlet.http.HttpServletRequest;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+@Component
+@Aspect
+public class ServiceLogAspect {
+
+    private static final Logger logger = LoggerFactory.getLogger(ServiceLogAspect.class);
+
+    //切入点
+    @Pointcut("execution(* com.justodit.service.*.*(..))")
+    public void pointcut(){
+
+    }
+
+    @Before("pointcut()")
+    public void before(JoinPoint joinPoint){
+        //用户[1.2.3.4],在xxx时间,访问了[com.justodit.service.xxxx()];
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        if (attributes == null){
+            //当配置了Kafka后会出现空指针异常 attributes为空,这里要进行判断
+            return;
+        }
+        HttpServletRequest request = attributes.getRequest();
+        String ip = request.getRemoteHost();
+        String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+            //getDeclaringTypeName()类名                      getName() 方法名
+        String target = joinPoint.getSignature().getDeclaringTypeName() + "." + joinPoint.getSignature().getName();
+        logger.info(String.format("用户[%s],在[%s],访问了[%s].",ip,now,target));
+    }
+}
+
+```
+
+
+
+
+
+# 三、显示系统通知
+
+![image-20200906145345544](imgaes/image-20200906145345544.png)
+
+## 1.通知列表
+
+​	**--显示评论、点赞、关注三种类型通知**
+
+### 1.1 xml、 MessageMapper
+
+```xml
+<!--  系统通知  -->
+    <!--  查询某个主题下的最新的通知  -->
+    <select id="selectLatestNotice" resultType="com.justodit.entity.Message">
+        select <include refid="selectFields"></include>
+        from message
+        where id in (
+            select max(id) from message
+            where status != 2
+            and from_id = 1
+            and to_id = #{userId}
+            and conversation_id = #{topic}
+        )
+    </select>
+
+    <!--    查询某个主题所包含的通知的数量-->
+    <select id="selectNoticeCount" resultType="int">
+        select count(id)
+        from message
+        where status != 2
+        and from_id = 1
+        and to_id = #{userId}
+        and conversation_id = #{topic}
+    </select>
+
+    <!--    查询未读的通知的数量  如果不传topic就说明查询所有的系统通知数量-->
+    <select id="selectNoticeUnreadCount" resultType="int">
+        select count(id)
+        from message
+        where status = 0
+        and from_id = 1
+        and to_id = #{userId}
+        <if test="topic!=null">
+            and conversation_id = #{topic}
+        </if>
+    </select>
+
+    <!--  查询某个主题的通知列表  -->
+    <select id="selectNotices" resultType="com.justodit.entity.Message">
+        select <include refid="selectFields"></include>
+        from message
+        where status != 2
+        and from_id = 1
+        and to_id = #{userId}
+        and conversation_id = #{topic}
+        order by create_time desc
+        limit #{offset},#{limit}
+    </select>
+
+
+```
+
+```java
+//会话
+@Mapper
+public interface MessageMapper {
+
+//系统通知
+
+    /**
+     *  查询某个主题下的最新的通知
+     * @param userId 用户id
+     * @param topic  通知主题类型
+     * @return
+     */
+    Message selectLatestNotice(int userId,String topic);
+
+    /**
+     * 查询某个主题所包含的通知的数量
+     * @param userId 用户id
+     * @param topic  通知主题类型
+     * @return
+     */
+    int selectNoticeCount(int userId,String topic);
+
+    /**
+     * 查询未读的通知的数量
+     * @param userId 用户id
+     * @param topic  通知主题类型
+     * @return
+     */
+    int selectNoticeUnreadCount(int userId,String topic);
+    
+}
+```
+
+
+
+### 1.2 MessageSevice
+
+```java
+package com.justodit.service;
+
+import com.justodit.dao.MessageMapper;
+import com.justodit.entity.Message;
+import com.justodit.util.SensitiveFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.web.util.HtmlUtils;
+import java.util.List;
+
+@Service
+public class MessageService {
+
+
+    @Autowired
+    private MessageMapper messageMapper;
+
+    @Autowired
+    private SensitiveFilter sensitiveFilter;
+    
+      //更新消息为已读
+    public int readMessage(List<Integer> ids){
+        return messageMapper.updateStatus(ids,1);
+    }
+
+//系统通知
+    /**
+     * 查询最新的系统通知
+     * @param userId
+     * @param topic
+     * @return
+     */
+    public Message findLatestNotice(int userId,String topic){
+        return messageMapper.selectLatestNotice(userId,topic);
+    }
+
+    /**
+     * 查询单个通知的数量
+     * @param userId
+     * @param topic
+     * @return
+     */
+    public int findNoticeCount(int userId,String topic){
+        return messageMapper.selectNoticeCount(userId,topic);
+    }
+
+    /**
+     * 查询未读通知的数量
+     * @param userId
+     * @param topic
+     * @return
+     */
+    public int findNoticeUnreadCount(int userId,String topic){
+        return messageMapper.selectNoticeUnreadCount(userId,topic);
+    }
+
+//系统通知详情
+    /**
+     * 查询系统通知列表
+     * @param userId 用户id
+     * @param topic  通知类型
+     * @param offset  分页
+     * @param limit
+     * @return
+     */
+    public List<Message> findNotices(int userId, String topic,int offset,int limit){
+        return messageMapper.selectNotices(userId,topic,offset,limit);
+    }
+}
+```
+
+
+
+### 1.3 MessageController
+
+```java
+ /**
+     * 系统通知
+     * @param model
+     * @return
+     */
+    @RequestMapping(value = "/notice/list",method = RequestMethod.GET)
+    public String getNoticeList(Model model){
+        User user = hostHolder.getUser();
+
+        //查询评论类的通知
+        Message message = messageService.findLatestNotice(user.getId(),TOPIC_COMMENT);
+        Map<String, Object> messageVo = new HashMap<>();
+        if (message != null){
+            messageVo.put("message",message);
+                //htmlescapt 是转义   htmlUnescape 是反转
+            String content = HtmlUtils.htmlUnescape(message.getContent());
+            Map<String,Object> data = JSONObject.parseObject(content, HashMap.class);
+            //内容
+            messageVo.put("user",userService.findUserById((Integer) data.get("userId")));
+            messageVo.put("entityType",data.get("entityType"));
+            messageVo.put("entityId",data.get("entityId"));
+            messageVo.put("postId",data.get("postId"));
+            //总消息数
+            int count = messageService.findNoticeCount(user.getId(),TOPIC_COMMENT);
+            messageVo.put("count",count);
+            //未读数
+            int unread = messageService.findNoticeUnreadCount(user.getId(),TOPIC_COMMENT);
+            messageVo.put("unread",unread);
+        }else {
+            messageVo.put("message",null);
+        }
+        model.addAttribute("commentNotice",messageVo);
+
+        //查询点赞类的通知
+         message = messageService.findLatestNotice(user.getId(), TOPIC_LIKE);
+         messageVo = new HashMap<>();
+        if (message != null){
+            messageVo.put("message",message);
+            //htmlescapt 是转义   htmlUnescape 是反转
+            String content = HtmlUtils.htmlUnescape(message.getContent());
+            Map<String,Object> data = JSONObject.parseObject(content,HashMap.class);
+            //内容
+            messageVo.put("user",userService.findUserById((Integer) data.get("userId")));
+            messageVo.put("entityType",data.get("entityType"));
+            messageVo.put("entityId",data.get("entityId"));
+            messageVo.put("postId",data.get("postId"));
+            //总消息数
+            int count = messageService.findNoticeCount(user.getId(),TOPIC_LIKE);
+            messageVo.put("count",count);
+            //未读数
+            int unread = messageService.findNoticeUnreadCount(user.getId(),TOPIC_LIKE);
+            messageVo.put("unread",unread);
+        }else {
+            messageVo.put("message",null);
+        }
+        model.addAttribute("likeNotice",messageVo);
+
+
+        //查询关注类的通知
+        message = messageService.findLatestNotice(user.getId(), TOPIC_FOLLOW);
+        messageVo = new HashMap<>();
+        if (message != null){
+            messageVo.put("message",message);
+            //htmlescapt 是转义   htmlUnescape 是反转
+            String content = HtmlUtils.htmlUnescape(message.getContent());
+            Map<String,Object> data = JSONObject.parseObject(content,HashMap.class);
+            //内容
+            messageVo.put("user",userService.findUserById((Integer) data.get("userId")));
+            messageVo.put("entityType",data.get("entityType"));
+            messageVo.put("entityId",data.get("entityId"));
+
+            //总消息数
+            int count = messageService.findNoticeCount(user.getId(),TOPIC_FOLLOW);
+            messageVo.put("count",count);
+            //未读数
+            int unread = messageService.findNoticeUnreadCount(user.getId(),TOPIC_FOLLOW);
+            messageVo.put("unread",unread);
+        }else {
+            messageVo.put("message",null);
+        }
+        model.addAttribute("followNotice",messageVo);
+
+
+        //查询未读消息数量  私信
+        int letterUnreadCount = messageService.findLetterUnreadCount(user.getId(),null);
+        model.addAttribute("letterUnreadCount",letterUnreadCount);
+        //查询未读消息数量  系统通知
+        int noticeUnreadCount = messageService.findNoticeUnreadCount(user.getId(),null);
+        model.addAttribute("noticeUnreadCount",noticeUnreadCount);
+
+        return "/site/notice";
+    }
+
+```
+
+
+
+### 1.4 Notice.Html
+
+```html
+<!-- 内容 -->
+		<div class="main">
+			<div class="container">
+				<div class="position-relative">
+					<!-- 选项 -->
+					<ul class="nav nav-tabs mb-3">
+						<li class="nav-item">
+							<a class="nav-link position-relative" th:href="@{/letter/list}">
+								朋友私信<span class="badge badge-danger" th:text="${letterUnreadCount}" th:if="${letterUnreadCount!=0}">3</span>
+							</a>
+						</li>
+						<li class="nav-item">
+							<a class="nav-link position-relative active" th:href="@{/notice/list}">
+								系统通知<span class="badge badge-danger" th:text="${noticeUnreadCount}" th:if="${noticeUnreadCount!=0}">27</span>
+							</a>
+						</li>
+					</ul>
+				</div>	
+				
+				<!-- 通知列表 -->
+				<ul class="list-unstyled">
+					<!--评论类通知-->
+					<li class="media pb-3 pt-3 mb-3 border-bottom position-relative" th:if="${commentNotice.message!=null}">
+						<span class="badge badge-danger" th:text="${commentNotice.unread!=0?commentNotice.unread:''}">3</span>
+						<img src="http://static.nowcoder.com/images/head/reply.png" class="mr-4 user-header" alt="通知图标">
+						<div class="media-body">
+							<h6 class="mt-0 mb-3">
+								<span>评论</span>
+								<span class="float-right text-muted font-size-12"
+									  th:text="${#dates.format(commentNotice.message.createTime,'yyyy-MM-dd HH:mm:ss')}">2019-04-28 14:13:25
+								</span>
+							</h6>
+							<div>
+								<a th:href="@{/notice/detail/comment}">
+									用户
+									<i th:utext="${commentNotice.user.username}">nowcoder</i>
+									评论了你的<b th:text="${commentNotice.entityType==1?'帖子':'评论'}">帖子</b> ...
+								</a>
+								<ul class="d-inline font-size-12 float-right">
+									<li class="d-inline ml-2"><span class="text-primary">共 <i th:text="${commentNotice.count}">3</i> 条会话</span></li>
+								</ul>
+							</div>
+						</div>
+					</li>
+					<!--点赞类通知-->
+					<li class="media pb-3 pt-3 mb-3 border-bottom position-relative" th:if="${likeNotice.message!=null}">
+						<span class="badge badge-danger" th:text="${likeNotice.unread!=0?likeNotice.unread:''}">3</span>
+						<img src="http://static.nowcoder.com/images/head/like.png" class="mr-4 user-header" alt="通知图标">
+						<div class="media-body">
+							<h6 class="mt-0 mb-3">
+								<span>赞</span>
+								<span class="float-right text-muted font-size-12"
+									th:text="${#dates.format(likeNotice.message.createTime,'yyyy-MM-dd HH:mm:ss')}">2019-04-28 14:13:25</span>
+							</h6>
+							<div>
+								<a th:href="@{/notice/detail/like}">
+									用户 <i th:text="${likeNotice.user.username}">nowcoder</i>
+									点赞了你的<b th:text="${likeNotice.entityType==1?'帖子':'回复'}">帖子</b> ...
+								</a>
+								<ul class="d-inline font-size-12 float-right">
+									<li class="d-inline ml-2"><span class="text-primary">共 <i th:text="${likeNotice.count}"> 3</i> 条会话</span></li>
+								</ul>
+							</div>
+						</div>
+					</li>
+					<!--关注类通知-->
+					<li class="media pb-3 pt-3 mb-3 border-bottom position-relative" th:if="${followNotice.message!=null}">
+						<span class="badge badge-danger" th:text="${followNotice.unread!=0?followNotice.unread:''}">3</span>
+						<img src="http://static.nowcoder.com/images/head/follow.png" class="mr-4 user-header" alt="通知图标">
+						<div class="media-body">
+							<h6 class="mt-0 mb-3">
+								<span>关注</span>
+								<span class="float-right text-muted font-size-12"
+										th:text="${#dates.format(followNotice.message.createTime,'yyyy-MM-dd HH:mm:ss')}">2019-04-28 14:13:25</span>
+							</h6>
+							<div>
+								<a th:href="@{/notice/detail/follow}">
+									用户
+									<i th:utext="${followNotice.user.username}">nowcoder</i>
+									关注了你 ...
+								</a>
+								<ul class="d-inline font-size-12 float-right">
+									<li class="d-inline ml-2"><span class="text-primary">共 <i th:text="${followNotice.count}">3</i> 条会话</span></li>
+								</ul>
+							</div>
+						</div>
+					</li>					
+				</ul>
+			</div>
+		</div>
+
+```
+
+
+
+## 2.通知详情
+
+​	**--分页显示某一类主题所包含的通知**
+
+### 2.1 xml、MessageMapper
+
+```xml
+  <!--  查询某个主题的通知列表  -->
+    <select id="selectNotices" resultType="com.justodit.entity.Message">
+        select <include refid="selectFields"></include>
+        from message
+        where status != 2
+        and from_id = 1
+        and to_id = #{userId}
+        and conversation_id = #{topic}
+        order by create_time desc
+        limit #{offset},#{limit}
+    </select>
+
+```
+
+```java
+//会话
+@Mapper
+public interface MessageMapper {
+    
+//通知详情
+
+    /**
+     * 查询某个主题所包含的通知列表
+     * @param userId 当前用户id
+     * @param topic   主题类型
+     * @param offset  分页
+     * @param limit
+     * @return
+     */
+    List<Message> selectNotices(int userId,String topic,int offset,int limit);
+
+}
+
+```
+
+
+
+### 2.2 MessageService
+
+```java
+//系统通知详情
+    /**
+     * 查询系统通知列表
+     * @param userId 用户id
+     * @param topic  通知类型
+     * @param offset  分页
+     * @param limit
+     * @return
+     */
+    public List<Message> findNotices(int userId, String topic,int offset,int limit){
+        return messageMapper.selectNotices(userId,topic,offset,limit);
+    }
+```
+
+### 2.3 MessageController
+
+```java
+  
+//消息
+import com.alibaba.fastjson.JSONObject;
+import com.justodit.entity.Message;
+import com.justodit.entity.Page;
+import com.justodit.entity.User;
+import com.justodit.service.MessageService;
+import com.justodit.service.UserService;
+import com.justodit.util.Constant;
+import com.justodit.util.HostHolder;
+import com.justodit.util.JustDoItUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.HtmlUtils;
+import java.util.*;
+
+@Controller
+public class MessageController implements Constant {
+
+    @Autowired
+    private MessageService messageService;
+
+    @Autowired
+    private HostHolder hostHolder;
+
+    @Autowired
+    private UserService userService;
+
+/**
+     * 系统通知详情
+     * @param topic  主题类型
+     * @param page  分页
+     * @param model
+     * @return
+     */
+    @GetMapping("/notice/detail/{topic}")
+    public String getNoticeDetail(@PathVariable("topic") String topic,Page page,Model model){
+        User user = hostHolder.getUser();
+        page.setLimit(5);
+        page.setPath("/notice/detail/"+topic);
+        page.setRows(messageService.findNoticeCount(user.getId(),topic));
+
+        List<Message> noticeList = messageService.findNotices(user.getId(),topic,page.getOffset(),page.getLimit());
+        List<Map<String,Object>> noticeVoList = new ArrayList<>();
+        if (noticeList != null){
+            for (Message notice : noticeList) {
+                Map<String,Object> map = new HashMap<>();
+                //通知
+                map.put("notice",notice);
+                //内容
+                String content = HtmlUtils.htmlUnescape(notice.getContent());
+                Map<String,Object> data = JSONObject.parseObject(content,HashMap.class);
+                map.put("user",userService.findUserById((Integer) data.get("userId")));
+                map.put("entityType",data.get("entityType"));
+                map.put("entityId",data.get("entityId"));
+                map.put("postId",data.get("postId"));//如果是评论和点赞通知有postId  关注没有为null
+                //通知作者
+                map.put("fromUser",userService.findUserById(notice.getFromId()));
+
+                noticeVoList.add(map);
+            }
+        }
+        model.addAttribute("notices",noticeVoList);
+
+        //设置已读
+        List<Integer> ids = getLetterIds(noticeList);
+        if (!ids.isEmpty()){
+            messageService.readMessage(ids);
+        }
+
+        return "/site/notice-detail";
+    }
+}
+```
+
+
+
+### 2.4 notice-detail.html
+
+```html
+<!-- 通知列表 -->
+				<ul class="list-unstyled mt-4">
+					<li class="media pb-3 pt-3 mb-2" th:each="map:${notices}">
+						<img th:src="${map.fromUser.headerUrl}" class="mr-4 rounded-circle user-header" alt="系统图标">
+						<div class="toast show d-lg-block" role="alert" aria-live="assertive" aria-atomic="true">
+							<div class="toast-header">
+								<strong class="mr-auto" th:utext="${map.fromUser.username}">落基山脉下的闲人</strong>
+								<small th:text="${#dates.format(map.notice.createTime,'yyyy-MM-dd HH:mm:ss')}">2019-04-25 15:49:32</small>
+								<button type="button" class="ml-2 mb-1 close" data-dismiss="toast" aria-label="Close">
+									<span aria-hidden="true">&times;</span>
+								</button>
+							</div>
+							<div class="toast-body">
+								<!--评论-->
+								<span th:if="${topic.equals('comment')}">
+									用户
+									<i th:utext="${map.user.username}">nowcoder</i>
+									评论了你的<b th:text="${map.entityType==1?'帖子':'回复'}">帖子</b>,
+									<a class="text-primary" th:href="@{|/discuss/detail/${map.postId}|}">点击查看</a> !
+								</span>
+								<!--点赞-->
+								<span th:if="${topic.equals('like')}">
+									用户
+									<i th:utext="${map.user.username}">nowcoder</i>
+									点赞了你的<b th:text="${map.entityType==1?'帖子':'回复'}">帖子</b>,
+									<a class="text-primary" th:href="@{|/discuss/detail/${map.postId}|}">点击查看</a> !
+								</span>
+								<!--关注-->
+								<span th:if="${topic.equals('follow')}">
+									用户
+									<i th:utext="${map.user.username}">nowcoder</i>
+									关注了你,
+									<a class="text-primary" th:href="@{|/user/profile/${map.user.id}|}">点击查看</a> !
+								</span>
+							</div>
+						</div>
+					</li>
+				</ul>
+```
+
+
+
+## 3.未读消息---拦截器
+
+​	**--在页面头部显示所有的未读消息数量**
+
+**MessageUnread.class**
+
+```java
+package com.justodit.interceptor;
+//index中未读消息总数量
+import com.justodit.entity.User;
+import com.justodit.service.MessageService;
+import com.justodit.util.HostHolder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.ModelAndView;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+@Component
+public class MessageInterceptor implements HandlerInterceptor {
+
+
+    @Autowired
+    private HostHolder hostHolder;
+
+    @Autowired
+    private MessageService messageService;
+
+    @Override
+    public void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler, ModelAndView modelAndView) throws Exception {
+        User user = hostHolder.getUser();
+        if (user != null && modelAndView != null){
+            int letterUnreadCount = messageService.findLetterUnreadCount(user.getId(),null);//未读私信
+            int noticeUnreadCount = messageService.findNoticeUnreadCount(user.getId(),null);//未读通知
+            modelAndView.addObject("allUnreadCount",letterUnreadCount+noticeUnreadCount);
+        }
+    }
+
+}
+
+```
+
+**注册拦截器**
+
+```java
+package com.justodit.config;
+
+import com.justodit.interceptor.LoginRequiredInterceptor;
+import com.justodit.interceptor.LoginTicketInterceptor;
+import com.justodit.interceptor.MessageInterceptor;
+import com.justodit.util.CookieUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebMvcConfig implements WebMvcConfigurer {
+
+
+    @Autowired
+    private LoginTicketInterceptor loginTicketInterceptor;
+
+    @Autowired
+    private LoginRequiredInterceptor loginRequiredInterceptor;
+
+    @Autowired
+    private MessageInterceptor messageInterceptor;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        //用户登录信息  ThreadLocal
+        registry.addInterceptor(loginTicketInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/**/*.css","/**/*.js","/**/*.png","/**/*.jpg","/**/*.jpeg");
+
+        //用户登录状态   自定义注解
+        registry.addInterceptor(loginRequiredInterceptor)
+                .excludePathPatterns("/**/*.css","/**/*.js","/**/*.png","/**/*.jpg","/**/*.jpeg");
+
+        //未读消息总数量
+        registry.addInterceptor(messageInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/**/*.css","/**/*.js","/**/*.png","/**/*.jpg","/**/*.jpeg");
+
+    }
+
+
+}
+
+```
+
